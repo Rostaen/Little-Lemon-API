@@ -4,8 +4,9 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import MenuItem, Category
-from .serializers import MenuItemSerializer, CategorySerializer, UserSerializer
+from decimal import Decimal
+from .models import MenuItem, Category, Cart
+from .serializers import MenuItemSerializer, CategorySerializer, UserSerializer, CartSerializer
 from .permissions import IsInGroup
 
 @api_view(['GET','POST'])
@@ -55,7 +56,7 @@ def manager_delete_user(request, id):
     return Response({"message": "For GET/POST please use group view"}, status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
-#@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 def menu_items(request):
     if request.method == 'GET':
         items = MenuItem.objects.select_related('category').all()
@@ -107,10 +108,8 @@ def menu_items(request):
         else:
             return Response({"message", "Access Denied"}, status.HTTP_403_FORBIDDEN)
 
-    return Response({"message": "There was an error with your request"}, status.HTTP_400_BAD_REQUEST)
-
 @api_view(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
-#@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 def single_menu_item(request, id):
     item = get_object_or_404(MenuItem, pk=id)
     if request.method == 'GET':
@@ -247,3 +246,34 @@ def delivery_crew_delete_user(request, id):
             return Response({"message": f"Username {username} was deleted from the database"}, status.HTTP_200_OK)
         return Response({"message": "User does not exist"}, status.HTTP_404_NOT_FOUND)
     return Response({"message": "For GET/POST please use group view"}, status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'POST', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def cart_management(request):
+    user = request.user
+    cart = Cart.objects.filter(user=user)
+    if request.method == 'GET':
+        serialized_cart = CartSerializer(cart, many=True)
+        return Response(serialized_cart.data)
+    elif request.method == 'POST':
+        menu_item_title = request.data.get('menu item')
+        try:
+            menu_item = MenuItem.objects.get(title=menu_item_title)
+        except MenuItem.DoesNotExist:
+            return Response({"message": f"{menu_item} does not exist in our menu"}, status.HTTP_400_BAD_REQUEST)
+        quantity = int(request.data.get('quantity', 0))
+        unit_price = Decimal(menu_item.price)
+        total_price = unit_price * quantity
+        Cart.objects.create(
+            user=user,
+            menuitem=menu_item,
+            quantity=quantity,
+            unit_price=unit_price,
+            price=total_price
+        )
+        return Response({"message": f"{menu_item_title} was added to the cart"}, status.HTTP_200_OK)
+    elif request.method == 'DELETE':
+        cart.delete()
+        return Response({"message": "Your cart has been emptied"}, status.HTTP_200_OK)
+    else:
+        return Response({"message": "PUT/PATCH/OPTIONS/HEAD not supported"}, status.HTTP_403_FORBIDDEN)
