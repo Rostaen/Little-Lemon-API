@@ -11,4 +11,6 @@ urlpatterns = [
     path('menu-items/<int:id>', views.single_menu_item),
     path('categories', views.categories),
     path('cart/menu-items', views.cart_management),
+    path('cart/orders', views.order_management),
+    path('cart/orders/<int:id>', views.order_id_management),
 ]

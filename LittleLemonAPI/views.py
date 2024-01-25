@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User, Group
 from rest_framework import status
@@ -5,8 +6,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from decimal import Decimal
-from .models import MenuItem, Category, Cart
-from .serializers import MenuItemSerializer, CategorySerializer, UserSerializer, CartSerializer
+from datetime import date
+from .models import MenuItem, Category, Cart, Order, OrderItem
+from .serializers import MenuItemSerializer, CategorySerializer, UserSerializer, CartSerializer, OrderSerializer, OrderItemSerializer
 from .permissions import IsInGroup
 
 @api_view(['GET','POST'])
@@ -277,3 +279,121 @@ def cart_management(request):
         return Response({"message": "Your cart has been emptied"}, status.HTTP_200_OK)
     else:
         return Response({"message": "PUT/PATCH/OPTIONS/HEAD not supported"}, status.HTTP_403_FORBIDDEN)
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def order_management(request):
+    user = request.user
+    cart_items = Cart.objects.filter(user=user)
+
+    if request.method == 'GET':
+        if user.groups.filter(name__in=['Manager']).exists() or request.user.is_superuser:
+            order = Order.objects.all()
+            if order.exists():
+                # order_items = OrderItem.objects.all()
+                serialized_orders = OrderSerializer(order, many=True)
+                # serialized_order_items = OrderItemSerializer(order_items)
+                return Response(serialized_orders.data)
+            else:
+                return Response({"message": f"No orders found"}, status.HTTP_404_NOT_FOUND)
+        else:
+            user_order = Order.objects.filter(user=user)
+            if user_order.exists():
+                #customer_order = Order.objects.filter(user=user)
+                serialized_user_orders = OrderSerializer(user_order, many=True)
+                #serialized_order = OrderSerializer(customer_order)
+                user_order_items = OrderItem.objects.filter(order__in=user_order)
+                serialized_user_order_items = OrderItemSerializer(user_order_items, many=True)
+                return Response({
+                    "orders": serialized_user_orders.data,
+                    "order_items": serialized_user_order_items.data
+                })
+            else:
+                return Response({"message": f"No order found for {user}"}, status.HTTP_404_NOT_FOUND)
+    elif request.method == 'POST':
+        try:
+            with transaction.atomic():
+                order_items = []
+                cart_total = 0
+                # Transfering cart to order items
+                for cart_item in cart_items:
+                    order_items.append(OrderItem(
+                        order=None,
+                        menuitem=cart_item.menuitem,
+                        quantity=cart_item.quantity,
+                        unit_price=cart_item.unit_price,
+                        price=cart_item.price
+                    ))
+                    cart_total += cart_item.price
+                # Creating an order linked to order items
+                order = Order.objects.create(
+                    user=user,
+                    delivery_crew=None,
+                    status=False,
+                    total=cart_total,
+                    date=date.today()
+                )
+                # Setting the order for the order items
+                OrderItem.objects.filter(
+                    order=None,
+                    menuitem__in=[item.menuitem for item in cart_items]
+                ).update(order=order)
+                # Deleting cart items
+                cart_items.delete()
+                return Response({"message": "Your order is being prepared"}, status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"message": f"Error processing order: {str(e)}"}, status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:
+        return Response({"message": "Error with requested method, try again"}, status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def order_id_management(request, id):
+    current_user = request.user
+    user = get_object_or_404(User, pk=id)
+    if request.method == 'GET':
+        # Checking if order and current user match
+        if current_user == user:
+            # Displaying order for user
+            user_order = Order.objects.filter(user = current_user)
+            serialize_order = OrderSerializer(user_order, many=True)
+            user_items = OrderItem.objects.filter(order__in=user_order)
+            serialize_items = OrderItemSerializer(user_items, many=True)
+            return Response({
+                    "orders": serialize_order.data,
+                    "order_items": serialize_items.data
+            })
+        else:
+            return Response({"message": "Only the owner of this order may view the contents"}, status.HTTP_403_FORBIDDEN)
+    elif request.method in ['PUT', 'PATCH']:
+        user_order = get_object_or_404(Order, pk=id)
+        if current_user.groups.filter(name__in=['Manager']).exists() or request.user.is_superuser:
+            # Implement updating delivery crew here
+            delivery_crew = request.data.get('delivery crew')
+            user_order.delivery_crew = delivery_crew
+            user_order.save()
+            return Response({"message": f"{delivery_crew} has been added to Order ID: {id}"}, status.HTTP_200_OK)
+        elif current_user.groups.filter(name__in=['Delivery Crew']).exists():
+            # Implement changing status to True = delivered
+            user_order.status = 1
+            user_order.save()
+            return Response({"message": f"{delivery_crew} has marked the order as delivered"}, status.HTTP_200_OK)
+        else:
+            return Response({"message": "PUT/PATCH Permission Denied"}, status.HTTP_403_FORBIDDEN)
+    elif request.method == 'DELETE':
+        # Check for Manager/Admin
+        if current_user.groups.filter(name__in=['Manager']).exists() or request.user.is_superuser:
+            # Implement Delete when Manager/admin validated
+            customer_name = request.data.get('username')
+            order = Order.objects.filter(user=customer_name)
+            if order:
+                order_items = OrderItem.objects.filter(user=user)
+                order.delete()
+                order_items.delete()
+                return Response({"message": f"The order for {customer_name} has been completed"}, status.HTTP_200_OK)
+            else:
+                return Response({"message": f"There is no order for {customer_name}"}, status.HTTP_404_NOT_FOUND)
+        else:
+            return Response({"message": "DELETE Permission Denied"}, status.HTTP_403_FORBIDDEN)
+    else:
+        return Response({"message": "Error with request method, try again"}, status.HTTP_400_BAD_REQUEST)
