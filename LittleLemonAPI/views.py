@@ -344,16 +344,17 @@ def order_id_management(request, id):
         # Checking if order and current user match
         if current_user == user:
             # Displaying order for user
-            user_items = get_object_or_404(OrderItem, pk=id)
-            serialize_items = OrderItemSerializer(user_items, many=True)
+            user_items = get_object_or_404(OrderItem, order=id)
+            serialize_items = OrderItemSerializer(user_items)
             return Response(serialize_items.data)
         else:
             return Response({"message": "Only the owner of this order may view the contents"}, status.HTTP_403_FORBIDDEN)
-    elif request.method in ['PUT', 'PATCH']:
-        user_order = get_object_or_404(Order, pk=id)
+    elif request.method == 'PUT' or request.method == 'PATCH':
+        user_order = get_object_or_404(Order, user=id)
         if current_user.groups.filter(name__in=['Manager']).exists() or request.user.is_superuser:
-            # Implement updating delivery crew here
-            delivery_crew = request.data.get('delivery crew')
+            # Updating delivery crew
+            delivery_crew_name = request.data.get('Delivery Crew')
+            delivery_crew = get_object_or_404(User, username=delivery_crew_name)
             user_order.delivery_crew = delivery_crew
             user_order.save()
             return Response({"message": f"{delivery_crew} has been added to Order ID: {id}"}, status.HTTP_200_OK)
