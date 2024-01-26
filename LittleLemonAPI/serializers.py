@@ -45,7 +45,7 @@ class OrderSerializer(serializers.Serializer):
 
 class OrderItemSerializer(serializers.Serializer):
     order = UserSerializer()
-    menuitem = serializers.Serializer()
+    menuitem = MenuItemSerializer()
     quantity = serializers.IntegerField()
     unit_price = serializers.DecimalField(max_digits=6, decimal_places=2)
     price = serializers.Serializer()

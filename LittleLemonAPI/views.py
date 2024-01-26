@@ -284,41 +284,33 @@ def cart_management(request):
 @permission_classes([IsAuthenticated])
 def order_management(request):
     user = request.user
-    cart_items = Cart.objects.filter(user=user)
-
     if request.method == 'GET':
         if user.groups.filter(name__in=['Manager']).exists() or request.user.is_superuser:
-            order = Order.objects.all()
-            if order.exists():
-                # order_items = OrderItem.objects.all()
-                serialized_orders = OrderSerializer(order, many=True)
-                # serialized_order_items = OrderItemSerializer(order_items)
-                return Response(serialized_orders.data)
-            else:
-                return Response({"message": f"No orders found"}, status.HTTP_404_NOT_FOUND)
+            orders = Order.objects.all().order_by('user')
+            serialized_orders = OrderSerializer(orders, many=True)
+            order_items = OrderItem.objects.all().order_by('order')
+            serialized_order_items = OrderItemSerializer(order_items, many=True)
+            return Response({
+                "orders": serialized_orders.data,
+                "order_items": serialized_order_items.data
+            })
         else:
-            user_order = Order.objects.filter(user=user)
-            if user_order.exists():
-                #customer_order = Order.objects.filter(user=user)
-                serialized_user_orders = OrderSerializer(user_order, many=True)
-                #serialized_order = OrderSerializer(customer_order)
-                user_order_items = OrderItem.objects.filter(order__in=user_order)
-                serialized_user_order_items = OrderItemSerializer(user_order_items, many=True)
-                return Response({
-                    "orders": serialized_user_orders.data,
-                    "order_items": serialized_user_order_items.data
-                })
+            user_orders = Order.objects.filter(user=user)
+            if user_orders.exists():
+                serialized_user_orders = OrderSerializer(user_orders, many=True)
+                return Response(serialized_user_orders.data)
             else:
                 return Response({"message": f"No order found for {user}"}, status.HTTP_404_NOT_FOUND)
     elif request.method == 'POST':
         try:
             with transaction.atomic():
+                cart_items = Cart.objects.filter(user=user)
                 order_items = []
                 cart_total = 0
                 # Transfering cart to order items
                 for cart_item in cart_items:
                     order_items.append(OrderItem(
-                        order=None,
+                        order=user,
                         menuitem=cart_item.menuitem,
                         quantity=cart_item.quantity,
                         unit_price=cart_item.unit_price,
@@ -333,11 +325,8 @@ def order_management(request):
                     total=cart_total,
                     date=date.today()
                 )
-                # Setting the order for the order items
-                OrderItem.objects.filter(
-                    order=None,
-                    menuitem__in=[item.menuitem for item in cart_items]
-                ).update(order=order)
+                # Saving items to database
+                OrderItem.objects.bulk_create(order_items)
                 # Deleting cart items
                 cart_items.delete()
                 return Response({"message": "Your order is being prepared"}, status.HTTP_200_OK)
@@ -355,14 +344,9 @@ def order_id_management(request, id):
         # Checking if order and current user match
         if current_user == user:
             # Displaying order for user
-            user_order = Order.objects.filter(user = current_user)
-            serialize_order = OrderSerializer(user_order, many=True)
-            user_items = OrderItem.objects.filter(order__in=user_order)
+            user_items = get_object_or_404(OrderItem, pk=id)
             serialize_items = OrderItemSerializer(user_items, many=True)
-            return Response({
-                    "orders": serialize_order.data,
-                    "order_items": serialize_items.data
-            })
+            return Response(serialize_items.data)
         else:
             return Response({"message": "Only the owner of this order may view the contents"}, status.HTTP_403_FORBIDDEN)
     elif request.method in ['PUT', 'PATCH']:
