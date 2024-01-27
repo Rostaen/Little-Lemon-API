@@ -62,13 +62,14 @@ def manager_delete_user(request, id):
 def menu_items(request):
     if request.method == 'GET':
         items = MenuItem.objects.select_related('category').all()
-        # category_name = request.query_params.get('category')
-        # title = request.query_params.get('title')
-        # price = request.query_params.get('price')
-        # featured = request.query_params.get('featured')
+        category_name = request.query_params.get('category')
+        title = request.query_params.get('title')
+        price = request.query_params.get('price')
+        featured = request.query_params.get('featured')
 
-        # Build filtered view here later
-
+        # Filter view of the database
+        if category_name:
+            items = items.filter(category__title=category_name)
         # ------------------------------
 
         # Build querying here later if needed
@@ -362,22 +363,21 @@ def order_id_management(request, id):
             # Implement changing status to True = delivered
             user_order.status = 1
             user_order.save()
-            return Response({"message": f"{delivery_crew} has marked the order as delivered"}, status.HTTP_200_OK)
+            return Response({"message": f"Delivery crew has marked {user_order.user}'s order as delivered"}, status.HTTP_200_OK)
         else:
             return Response({"message": "PUT/PATCH Permission Denied"}, status.HTTP_403_FORBIDDEN)
     elif request.method == 'DELETE':
         # Check for Manager/Admin
         if current_user.groups.filter(name__in=['Manager']).exists() or request.user.is_superuser:
             # Implement Delete when Manager/admin validated
-            customer_name = request.data.get('username')
-            order = Order.objects.filter(user=customer_name)
-            if order:
-                order_items = OrderItem.objects.filter(user=user)
-                order.delete()
+            user_order = get_object_or_404(Order, user=id)
+            if user_order:
+                order_items = get_object_or_404(OrderItem, order=id)
+                user_order.delete()
                 order_items.delete()
-                return Response({"message": f"The order for {customer_name} has been completed"}, status.HTTP_200_OK)
+                return Response({"message": f"The order for {user.username} has been completed and removed from the database"}, status.HTTP_200_OK)
             else:
-                return Response({"message": f"There is no order for {customer_name}"}, status.HTTP_404_NOT_FOUND)
+                return Response({"message": f"There is no order for {user.username}"}, status.HTTP_404_NOT_FOUND)
         else:
             return Response({"message": "DELETE Permission Denied"}, status.HTTP_403_FORBIDDEN)
     else:
