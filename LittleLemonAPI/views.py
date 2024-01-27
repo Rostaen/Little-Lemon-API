@@ -1,15 +1,21 @@
 from django.db import transaction
+from django.core.paginator import Paginator, EmptyPage
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User, Group
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from decimal import Decimal
 from datetime import date
 from .models import MenuItem, Category, Cart, Order, OrderItem
 from .serializers import MenuItemSerializer, CategorySerializer, UserSerializer, CartSerializer, OrderSerializer, OrderItemSerializer
 from .permissions import IsInGroup
+
+# Global Variables
+per_page_view = 3
+per_page = 1
 
 @api_view(['GET','POST'])
 @permission_classes([IsAuthenticated, IsInGroup])
@@ -59,22 +65,43 @@ def manager_delete_user(request, id):
 
 @api_view(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([AnonRateThrottle, UserRateThrottle])
 def menu_items(request):
     if request.method == 'GET':
         items = MenuItem.objects.select_related('category').all()
+        # Filtering my menu item type
         category_name = request.query_params.get('category')
         title = request.query_params.get('title')
         price = request.query_params.get('price')
         featured = request.query_params.get('featured')
+        # Filtering by search term
+        search = request.query_params.get('search')
+        ordering = request.query_params.get('ordering')
+        # Setting up pagination
+        perpage = request.query_params.get('perpage', default=per_page_view)
+        page = request.query_params.get('page', default=per_page)
 
         # Filter view of the database
         if category_name:
             items = items.filter(category__title=category_name)
-        # ------------------------------
+        if price:
+            items = items.filter(price__lte=price)
+        if title:
+            items = items.filter(title=title)
+        if featured:
+            items = items.filter(featured=featured)
+        if search:
+            items = items.filter(title__icontains=search)
+        if ordering:
+            ordering_fields = ordering.split(",")
+            items = items.order_by(*ordering_fields)
 
-        # Build querying here later if needed
-
-        # -----------------------------------
+        # Querying the database with supplied or default values
+        paginator = Paginator(items, per_page=perpage)
+        try:
+            items = paginator.page(number=page)
+        except EmptyPage:
+            items = []
 
         serialized_item = MenuItemSerializer(items, many=True)
         return Response(serialized_item.data)
@@ -287,6 +314,41 @@ def order_management(request):
     user = request.user
     if request.method == 'GET':
         if user.groups.filter(name__in=['Manager']).exists() or request.user.is_superuser:
+            filtered_orders = Order.objects.select_related('user').all()
+            # Filtering my menu item type
+            username = request.query_params.get('username')
+            deliverycrew = request.query_params.get('deliverycrew')
+            quantity = request.query_params.get('quantity')
+            price = request.query_params.get('price')
+            # Filtering by search term
+            search = request.query_params.get('search')
+            ordering = request.query_params.get('ordering')
+            # Setting up pagination
+            perpage = request.query_params.get('perpage', default=per_page_view)
+            page = request.query_params.get('page', default=per_page)
+
+            # Filter view of the database
+            if username:
+                filtered_orders = filtered_orders.filter(category__title=username)
+            if quantity:
+                filtered_orders = filtered_orders.filter(quantity__lte=quantity)
+            if deliverycrew:
+                filtered_orders = filtered_orders.filter(delivery_crew=deliverycrew)
+            if price:
+                filtered_orders = filtered_orders.filter(price__lte=price)
+            if search:
+                filtered_orders = filtered_orders.filter(title__icontains=search)
+            if ordering:
+                ordering_fields = ordering.split(",")
+                filtered_orders = filtered_orders.order_by(*ordering_fields)
+
+            # Querying the database with supplied or default values
+            paginator = Paginator(filtered_orders, per_page=perpage)
+            try:
+                filtered_orders = paginator.page(number=page)
+            except EmptyPage:
+                filtered_orders = []
+
             orders = Order.objects.all().order_by('user')
             serialized_orders = OrderSerializer(orders, many=True)
             order_items = OrderItem.objects.all().order_by('order')
@@ -345,6 +407,44 @@ def order_id_management(request, id):
         # Checking if order and current user match
         if current_user == user:
             # Displaying order for user
+            filtered_orders = OrderItem.objects.select_related('order').all()
+            # Filtering my menu item type
+            user_order = request.query_params.get('userorder')
+            menuitem = request.query_params.get('menuitem')
+            quantity = request.query_params.get('quantity')
+            unitprice = request.query_params.get('unitprice')
+            price = request.query_params.get('price')
+            # Filtering by search term
+            search = request.query_params.get('search')
+            ordering = request.query_params.get('ordering')
+            # Setting up pagination
+            perpage = request.query_params.get('perpage', default=per_page_view)
+            page = request.query_params.get('page', default=per_page)
+
+            # Filter view of the database
+            if user_order:
+                filtered_orders = filtered_orders.filter(category__title=user_order)
+            if quantity:
+                filtered_orders = filtered_orders.filter(quantity__lte=quantity)
+            if menuitem:
+                filtered_orders = filtered_orders.filter(menuitem=menuitem)
+            if unitprice:
+                filtered_orders = filtered_orders.filter(unit_price=unitprice)
+            if price:
+                filtered_orders = filtered_orders.filter(price__lte=price)
+            if search:
+                filtered_orders = filtered_orders.filter(title__icontains=search)
+            if ordering:
+                ordering_fields = ordering.split(",")
+                filtered_orders = filtered_orders.order_by(*ordering_fields)
+
+            # Querying the database with supplied or default values
+            paginator = Paginator(filtered_orders, per_page=perpage)
+            try:
+                filtered_orders = paginator.page(number=page)
+            except EmptyPage:
+                filtered_orders = []
+
             user_items = get_object_or_404(OrderItem, order=id)
             serialize_items = OrderItemSerializer(user_items)
             return Response(serialize_items.data)
